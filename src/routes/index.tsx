@@ -78,21 +78,21 @@ function Index() {
               `${i + 1}. ${a.task}\n   Owner: ${a.owner} — Deadline: ${a.deadline}`
           )
           .join("\n")
-      : "None recorded.";
+      : "None identified.";
     return `EXECUTIVE SUMMARY
 ${r.executiveSummary}
 
 DECISIONS MADE
-${r.decisions.length ? r.decisions.map((d) => `• ${d}`).join("\n") : "None recorded."}
+${r.decisions.length ? r.decisions.map((d) => `• ${d}`).join("\n") : "None identified."}
 
 ACTION ITEMS
 ${ai}
 
 RISKS / ISSUES
-${r.risks.length ? r.risks.map((d) => `• ${d}`).join("\n") : "None recorded."}
+${r.risks.length ? r.risks.map((d) => `• ${d}`).join("\n") : "None identified."}
 
 OPEN QUESTIONS
-${r.openQuestions.length ? r.openQuestions.map((d) => `• ${d}`).join("\n") : "None recorded."}
+${r.openQuestions.length ? r.openQuestions.map((d) => `• ${d}`).join("\n") : "None identified."}
 
 SUGGESTED FOLLOW-UP EMAIL
 ${r.followUpEmail}`;
@@ -425,6 +425,6 @@ function BulletList({ items }: { items: string[] }) {
 
 function EmptyLine() {
   return (
-    <p className="text-sm italic text-muted-foreground">None recorded.</p>
+    <p className="text-sm italic text-muted-foreground">None identified.</p>
   );
 }
