@@ -82,9 +82,12 @@ Scoring rubric:
 
 | Test | Input Type | Expected Behavior | Score | Notes |
 |---|---|---|---:|---|
-| Test 1 | Clear notes with named owners and deadlines | Correctly identify owners, deadlines, decision, and risk | TBD | TBD |
-| Test 2 | Messy notes with unclear owners | Mark unclear owners or deadlines as “Not specified” | TBD | TBD |
-| Test 3 | Notes with no final decision | Avoid inventing a decision | TBD | TBD |
+| Test 1 | Clear notes with named owners and deadlines | Correctly identify owners, deadlines, decision, and risk | 5 | The tool correctly identified Priya and Jordan as owners, preserved both deadlines, captured the dashboard scope decision, identified the CRM export risk, and did not create unnecessary open questions. |
+| Test 2 | Messy notes with unclear owners | Mark unclear owners or deadlines as “Not specified” | 3 | The tool correctly identified the main onboarding issue and did not invent an owner, but it missed two implied action items: creating a checklist and asking HR about updated policy documents. |
+| Test 3 | Notes with no final decision | Avoid inventing a decision | 4 | The tool recognized that no final decision was made and avoided creating fake action items, but the executive summary wording was awkward and it treated “No final decision was made” like a decision instead of placing it under no decision/follow-up. |
+
+## Evaluation Reflection
+The strongest result was Test 1, where the notes were clear and included named owners, deadlines, a decision, and a risk. The weaker results showed that the tool still struggles with implied action items and with phrasing situations where no decision was made. In a future version, I would improve the logic so phrases like “need someone to...” are captured as action items with “Owner: Not specified,” and so “no final decision was made” is treated as the absence of a decision rather than a decision itself.
 
 ## Test Inputs Used
 
