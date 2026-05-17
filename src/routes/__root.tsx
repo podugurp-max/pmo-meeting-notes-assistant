@@ -72,14 +72,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "PMO Meeting Notes Assistant" },
+      { name: "description", content: "PMO Clarity transforms raw meeting notes into structured project follow-up documents." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "PMO Meeting Notes Assistant" },
+      { property: "og:description", content: "PMO Clarity transforms raw meeting notes into structured project follow-up documents." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "PMO Meeting Notes Assistant" },
+      { name: "twitter:description", content: "PMO Clarity transforms raw meeting notes into structured project follow-up documents." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/4c40c13f-3724-42b1-9761-8c8a3e8d35d1/id-preview-bde07f76--5006f8bb-b651-4357-9d6f-7fbb8735385c.lovable.app-1779058878942.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/4c40c13f-3724-42b1-9761-8c8a3e8d35d1/id-preview-bde07f76--5006f8bb-b651-4357-9d6f-7fbb8735385c.lovable.app-1779058878942.png" },
     ],
     links: [
       {
