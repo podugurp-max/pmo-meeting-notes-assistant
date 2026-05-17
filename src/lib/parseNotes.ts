@@ -1,74 +1,201 @@
+export interface ActionItem {
+  task: string;
+  owner: string;
+  deadline: string;
+}
+
 export interface PMOSummary {
   executiveSummary: string;
   decisions: string[];
-  actionItems: { task: string; owner: string; deadline: string }[];
+  actionItems: ActionItem[];
   risks: string[];
   openQuestions: string[];
   followUpEmail: string;
 }
 
 const NOT_SPECIFIED = "Not specified";
+const NONE = "None identified.";
 
-const splitLines = (text: string) =>
-  text
-    .split(/\r?\n/)
-    .map((l) => l.replace(/^[\s\-\*•·●▪◦\d\.\)]+/, "").trim())
-    .filter((l) => l.length > 0);
+// --- Tokenization ---------------------------------------------------------
 
-const splitSentences = (text: string) =>
-  text
-    .replace(/\n+/g, " ")
-    .split(/(?<=[.!?])\s+(?=[A-Z0-9])/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+// Split into "units" (sentences or bullet lines). Bullet lines are kept intact;
+// paragraph text is split into sentences. This is the core fix: classification
+// happens per-unit, never on the whole paragraph.
+function tokenize(raw: string): string[] {
+  const units: string[] = [];
+  const lines = raw.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const bulletMatch = line.match(/^([\-\*•·●▪◦]|\d+[\.\)])\s+(.*)$/);
+    const stripped = bulletMatch ? bulletMatch[2].trim() : line;
 
-// Match dates like "by Friday", "by 12/05", "on Oct 5", "next Monday", "EOD", "by end of week"
-const DATE_PATTERNS = [
-  /\b(by|before|on|due|deadline[: ]+|due date[: ]+)\s+([A-Z][a-z]+\s+\d{1,2}(?:,\s*\d{4})?)/i,
-  /\b(by|before|on|due)\s+(\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)/i,
-  /\b(by|before|on|due)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i,
-  /\b(by|before)\s+(next\s+(?:week|monday|tuesday|wednesday|thursday|friday|month|quarter))/i,
-  /\b(by|before)\s+(end of (?:day|week|month|quarter|sprint)|EOD|EOW|EOM|COB)/i,
-  /\b(this|next)\s+(week|month|quarter|sprint)\b/i,
-  /\bQ[1-4]\s*\d{0,4}\b/,
-  /\b\d{4}-\d{2}-\d{2}\b/,
-];
-
-function extractDeadline(line: string): string {
-  for (const re of DATE_PATTERNS) {
-    const m = line.match(re);
-    if (m) return m[0].replace(/^by\s+|^before\s+|^on\s+|^due\s+/i, "").trim();
+    if (bulletMatch) {
+      if (stripped) units.push(stripped);
+    } else {
+      // paragraph — split into sentences
+      const sentences = stripped
+        .split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      units.push(...sentences);
+    }
   }
-  return NOT_SPECIFIED;
-}
-
-// Owner: look for "@name", "Name will/to", "assigned to Name", "Owner: Name"
-function extractOwner(line: string): string {
-  const at = line.match(/@([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/);
-  if (at) return at[1];
-  const assigned = line.match(/\b(?:assigned to|owner[: ]+|responsible[: ]+)\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/i);
-  if (assigned) return assigned[1];
-  const willDo = line.match(/\b([A-Z][a-zA-Z]+)\s+(?:will|to|should|is going to|needs to|must)\s+/);
-  if (willDo) return willDo[1];
-  const dashOwner = line.match(/\(([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\)/);
-  if (dashOwner) return dashOwner[1];
-  return NOT_SPECIFIED;
-}
-
-const ACTION_KEYWORDS = /\b(will|to do|todo|action|follow up|follow-up|send|share|prepare|draft|review|complete|finish|create|update|schedule|set up|organize|deliver|submit|provide|investigate|confirm|reach out|contact|email|book|coordinate|assign|finalize|build|test|deploy|write|document)\b/i;
-const DECISION_KEYWORDS = /\b(decided|decision|agreed|approved|confirmed|will go with|chose|selected|signed off|finaliz(?:e|ed)|concluded|resolved that)\b/i;
-const RISK_KEYWORDS = /\b(risk|issue|blocker|concern|problem|delay|delayed|behind schedule|at risk|jeopardy|conflict|escalat|dependency|bottleneck|over budget|short(?:age|fall))\b/i;
-const QUESTION_KEYWORDS = /\b(unclear|tbd|to be determined|to be decided|need(?:s)? to clarify|pending|awaiting|unknown|not sure|question|open item|figure out|determine)\b/i;
-
-function dedupe(arr: string[]): string[] {
+  // Deduplicate while preserving order
   const seen = new Set<string>();
-  return arr.filter((x) => {
-    const k = x.toLowerCase().trim();
+  return units.filter((u) => {
+    const k = u.toLowerCase();
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
   });
 }
+
+// --- Extraction helpers ---------------------------------------------------
+
+const MONTHS =
+  "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
+const WEEKDAYS = "(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day)?";
+
+// Deadline phrase extraction. Returns the human-readable deadline (e.g. "May 17").
+function extractDeadline(unit: string): string {
+  const patterns: RegExp[] = [
+    new RegExp(`\\bby\\s+(${MONTHS}\\s+\\d{1,2}(?:,\\s*\\d{4})?)`, "i"),
+    new RegExp(`\\b(?:on|before|due|deadline[: ]+)\\s+(${MONTHS}\\s+\\d{1,2}(?:,\\s*\\d{4})?)`, "i"),
+    new RegExp(`\\b(${MONTHS}\\s+\\d{1,2}(?:,\\s*\\d{4})?)`, "i"),
+    /\bby\s+(\d{1,2}[\/\-]\d{1,2}(?:[\/\-]\d{2,4})?)/i,
+    /\b(\d{4}-\d{2}-\d{2})\b/,
+    new RegExp(`\\bby\\s+(next\\s+${WEEKDAYS}|${WEEKDAYS})`, "i"),
+    /\bby\s+(end of (?:day|week|month|quarter|sprint)|EOD|EOW|EOM|COB)\b/i,
+    /\b(this|next)\s+(week|month|quarter|sprint)\b/i,
+    /\b(Q[1-4](?:\s*\d{2,4})?)\b/,
+  ];
+  for (const re of patterns) {
+    const m = unit.match(re);
+    if (m) return (m[1] || m[0]).trim();
+  }
+  return NOT_SPECIFIED;
+}
+
+const NAME_RE = /\b([A-Z][a-z]{1,15})(?:\s+([A-Z][a-z]{1,15}))?\b/;
+
+const ROLE_WORDS = new Set([
+  "Team",
+  "The",
+  "Risk",
+  "Decision",
+  "Action",
+  "Open",
+  "Owner",
+  "Subject",
+  "Meeting",
+  "IT",
+]);
+
+function extractOwner(unit: string): string {
+  // "Priya will ...", "Jordan needs to ...", "Marcus to ..."
+  const verbAfterName = unit.match(
+    /\b([A-Z][a-z]{1,15}(?:\s+[A-Z][a-z]{1,15})?)\s+(?:will|to|should|needs to|is going to|must|plans to|agreed to)\b/
+  );
+  if (verbAfterName && !ROLE_WORDS.has(verbAfterName[1].split(" ")[0])) {
+    return verbAfterName[1];
+  }
+  // "@Name"
+  const at = unit.match(/@([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/);
+  if (at) return at[1];
+  // "Owner: Name" / "assigned to Name"
+  const explicit = unit.match(
+    /\b(?:assigned to|owner[: ]+|responsible[: ]+)\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)/i
+  );
+  if (explicit) return explicit[1];
+  return NOT_SPECIFIED;
+}
+
+// Build the "task" text for an action item: the verb phrase after the owner,
+// minus the deadline clause, cleaned up.
+function extractTask(unit: string, owner: string, deadline: string): string {
+  let task = unit;
+
+  // Remove "Owner will/to/needs to" prefix
+  if (owner !== NOT_SPECIFIED) {
+    const prefix = new RegExp(
+      `^${owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(?:will|to|should|needs to|is going to|must|plans to|agreed to)\\s+`,
+      "i"
+    );
+    task = task.replace(prefix, "");
+  }
+
+  // Remove leading "Action:" / "TODO:" labels
+  task = task.replace(/^(action(?: item)?|todo|to do|next step)s?[: ]+/i, "");
+
+  // Trim trailing punctuation
+  task = task.replace(/\s+/g, " ").trim();
+  task = task.replace(/[.,;]+$/, "");
+
+  // Capitalize first letter
+  if (task.length > 0) task = task[0].toUpperCase() + task.slice(1);
+
+  // Append period
+  if (task && !/[.!?]$/.test(task)) task += ".";
+
+  return task;
+}
+
+// Strip a leading "Decided to" / "Agreed to" / "Risk:" etc. for cleaner bullets
+function cleanDecision(unit: string): string {
+  let s = unit
+    .replace(/^(?:the team |the group |we |they )?(?:decided|agreed|approved|confirmed|signed off|concluded|resolved)\s+(?:to|that|on)?\s+/i, "")
+    .replace(/^decision[: ]+/i, "")
+    .trim();
+  if (s) s = s[0].toUpperCase() + s.slice(1);
+  if (s && !/[.!?]$/.test(s)) s += ".";
+  return s;
+}
+
+function cleanRisk(unit: string): string {
+  let s = unit
+    .replace(/^(?:risk|issue|blocker|concern)[: ]+/i, "")
+    .replace(/^(?:there is a |there's a )?(?:risk|issue|concern)\s+(?:that|of|with)\s+/i, "")
+    .trim();
+  if (s) s = s[0].toUpperCase() + s.slice(1);
+  if (s && !/[.!?]$/.test(s)) s += ".";
+  return s;
+}
+
+function cleanQuestion(unit: string): string {
+  let s = unit.replace(/^(?:open question|question|tbd|unclear)[: ]+/i, "").trim();
+  if (s) s = s[0].toUpperCase() + s.slice(1);
+  return s;
+}
+
+// --- Classification -------------------------------------------------------
+
+// Order matters: action > decision > risk > question > narrative.
+type Category = "action" | "decision" | "risk" | "question" | "narrative";
+
+const ACTION_VERB =
+  /\b(will|to do|todo|action item|action:|follow up|follow-up|send|share|prepare|draft|review|complete|finish|create|update|schedule|set up|organize|deliver|submit|provide|investigate|confirm|reach out|contact|email|book|coordinate|assign|finaliz(?:e|ed)|build|test|deploy|write|document|check|coordinate|sync)\b/i;
+const ACTION_OWNER =
+  /\b[A-Z][a-z]{1,15}(?:\s+[A-Z][a-z]{1,15})?\s+(?:will|to|should|needs to|is going to|must|plans to|agreed to)\b/;
+const DECISION_RE =
+  /\b(decided|decision[: ]|agreed|approved|confirmed|signed off|chose|selected|concluded|resolved that|will go with|finaliz(?:e|ed) (?:on|to)|keep the first version|will keep)\b/i;
+const RISK_RE =
+  /\b(risk[: ]|issue[: ]|blocker|concern|problem|delay|delayed|behind schedule|at risk|jeopardy|escalat|bottleneck|over budget|may not (?:be ready|happen|work)|might not|could (?:slip|delay|block))\b/i;
+const QUESTION_RE =
+  /\?\s*$|\b(open question|tbd|to be determined|to be decided|unclear who|unclear whether|unclear if|need to clarify|needs clarification|pending decision|awaiting|unknown owner)\b/i;
+
+function classify(unit: string): Category {
+  // Decision takes priority over action when both match (e.g. "Team decided X" not an action).
+  if (DECISION_RE.test(unit)) return "decision";
+  // Action: needs an owner-pattern OR an explicit action label/verb at start
+  if (ACTION_OWNER.test(unit)) return "action";
+  if (/^(action(?: item)?|todo|to do|next step)s?[: ]/i.test(unit)) return "action";
+  if (RISK_RE.test(unit)) return "risk";
+  if (QUESTION_RE.test(unit)) return "question";
+  return "narrative";
+}
+
+// --- Main parser ----------------------------------------------------------
 
 export function parseNotes(raw: string): PMOSummary {
   const text = raw.trim();
@@ -83,89 +210,142 @@ export function parseNotes(raw: string): PMOSummary {
     };
   }
 
-  const lines = splitLines(text);
-  const sentences = splitSentences(text);
+  const units = tokenize(text);
 
   const decisions: string[] = [];
   const risks: string[] = [];
   const openQuestions: string[] = [];
-  const actionLines: string[] = [];
+  const actionItems: ActionItem[] = [];
+  const narrative: string[] = [];
 
-  for (const line of lines) {
-    const isQuestion = line.endsWith("?") || QUESTION_KEYWORDS.test(line);
-    const isDecision = DECISION_KEYWORDS.test(line);
-    const isRisk = RISK_KEYWORDS.test(line);
-    const isAction = ACTION_KEYWORDS.test(line);
-
-    if (isQuestion) openQuestions.push(line);
-    if (isDecision) decisions.push(line);
-    if (isRisk) risks.push(line);
-    if (isAction && !isDecision && !isRisk && !isQuestion) actionLines.push(line);
+  for (const unit of units) {
+    const cat = classify(unit);
+    switch (cat) {
+      case "action": {
+        const owner = extractOwner(unit);
+        const deadline = extractDeadline(unit);
+        const task = extractTask(unit, owner, deadline);
+        if (task) actionItems.push({ task, owner, deadline });
+        break;
+      }
+      case "decision": {
+        const cleaned = cleanDecision(unit);
+        if (cleaned) decisions.push(cleaned);
+        break;
+      }
+      case "risk": {
+        const cleaned = cleanRisk(unit);
+        if (cleaned) risks.push(cleaned);
+        break;
+      }
+      case "question": {
+        const cleaned = cleanQuestion(unit);
+        if (cleaned) openQuestions.push(cleaned);
+        break;
+      }
+      default:
+        narrative.push(unit);
+    }
   }
 
-  // Also check sentences for additional decisions/risks not on their own line
-  for (const s of sentences) {
-    if (DECISION_KEYWORDS.test(s) && !decisions.some((d) => d.includes(s))) decisions.push(s);
-    if (RISK_KEYWORDS.test(s) && !risks.some((d) => d.includes(s))) risks.push(s);
-  }
+  // Executive summary: prefer the first narrative sentence (often the meeting
+  // context), then add a one-line tally. Never repeat the entire input.
+  const contextSentence = narrative[0] || "";
+  const decisionSentence =
+    decisions.length === 1
+      ? `The group decided to ${decisions[0].replace(/\.$/, "").toLowerCase()}.`
+      : decisions.length > 1
+      ? `${decisions.length} decisions were recorded.`
+      : "";
+  const tallyParts: string[] = [];
+  if (actionItems.length)
+    tallyParts.push(
+      `${actionItems.length} follow-up action${actionItems.length === 1 ? "" : "s"} ${actionItems.length === 1 ? "was" : "were"} identified`
+    );
+  if (risks.length)
+    tallyParts.push(
+      `${risks.length} risk${risks.length === 1 ? "" : "s"} ${risks.length === 1 ? "was" : "were"} raised`
+    );
+  const tally = tallyParts.length ? tallyParts.join(", ") + "." : "";
 
-  const actionItems = dedupe(actionLines).map((line) => ({
-    task: line,
-    owner: extractOwner(line),
-    deadline: extractDeadline(line),
-  }));
+  const executiveSummary =
+    [contextSentence, decisionSentence, tally].filter(Boolean).join(" ").trim() ||
+    "Summary unavailable — no narrative context detected in the notes.";
 
-  // Executive summary: first 1-3 sentences that aren't action/decision/risk specific, fallback to first sentences
-  const summaryCandidates = sentences.filter(
-    (s) => !ACTION_KEYWORDS.test(s) && !DECISION_KEYWORDS.test(s) && !RISK_KEYWORDS.test(s) && !s.endsWith("?")
-  );
-  const summarySource = (summaryCandidates.length ? summaryCandidates : sentences).slice(0, 3).join(" ");
-  const stats = `The meeting covered ${decisions.length} decision${decisions.length === 1 ? "" : "s"}, ${actionItems.length} action item${actionItems.length === 1 ? "" : "s"}, ${risks.length} risk${risks.length === 1 ? "" : "s"}/issue${risks.length === 1 ? "" : "s"}, and ${openQuestions.length} open question${openQuestions.length === 1 ? "" : "s"}.`;
-  const executiveSummary = summarySource ? `${summarySource} ${stats}` : stats;
-
-  // Follow-up email
-  const today = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-  const actionLinesEmail = actionItems.length
-    ? actionItems
-        .map((a, i) => `  ${i + 1}. ${a.task}\n     Owner: ${a.owner} — Deadline: ${a.deadline}`)
-        .join("\n")
-    : "  None recorded.";
-  const decisionLinesEmail = decisions.length ? decisions.map((d) => `  • ${d}`).join("\n") : "  None recorded.";
-  const riskLinesEmail = risks.length ? risks.map((r) => `  • ${r}`).join("\n") : "  None recorded.";
-  const questionLinesEmail = openQuestions.length ? openQuestions.map((q) => `  • ${q}`).join("\n") : "  None recorded.";
-
-  const followUpEmail = `Subject: Meeting Recap & Next Steps — ${today}
-
-Hi team,
-
-Thank you for joining today's meeting. Below is a brief recap and the agreed next steps.
-
-Summary
-${executiveSummary}
-
-Decisions
-${decisionLinesEmail}
-
-Action Items
-${actionLinesEmail}
-
-Risks / Issues
-${riskLinesEmail}
-
-Open Questions
-${questionLinesEmail}
-
-Please reply if anything is missing or needs to be corrected.
-
-Best regards,
-[Your name]`;
+  // Build the suggested follow-up email — using only extracted information.
+  const followUpEmail = buildEmail({
+    contextSentence,
+    decisions,
+    actionItems,
+    risks,
+    openQuestions,
+  });
 
   return {
     executiveSummary,
-    decisions: dedupe(decisions),
+    decisions,
     actionItems,
-    risks: dedupe(risks),
-    openQuestions: dedupe(openQuestions),
+    risks,
+    openQuestions,
     followUpEmail,
   };
+}
+
+function buildEmail(args: {
+  contextSentence: string;
+  decisions: string[];
+  actionItems: ActionItem[];
+  risks: string[];
+  openQuestions: string[];
+}): string {
+  const { contextSentence, decisions, actionItems, risks, openQuestions } = args;
+
+  const decisionBlock = decisions.length
+    ? decisions.map((d) => `  • ${d}`).join("\n")
+    : `  ${NONE}`;
+
+  const actionBlock = actionItems.length
+    ? actionItems
+        .map((a) => {
+          const owner = a.owner !== NOT_SPECIFIED ? a.owner : "Owner TBD";
+          const deadline =
+            a.deadline !== NOT_SPECIFIED ? ` (due ${a.deadline})` : "";
+          return `  • ${owner}: ${a.task}${deadline ? deadline : ""}`;
+        })
+        .join("\n")
+    : `  ${NONE}`;
+
+  const riskBlock = risks.length
+    ? risks.map((r) => `  • ${r}`).join("\n")
+    : `  ${NONE}`;
+
+  const questionBlock = openQuestions.length
+    ? openQuestions.map((q) => `  • ${q}`).join("\n")
+    : `  ${NONE}`;
+
+  const intro = contextSentence
+    ? contextSentence
+    : "Here is a brief recap of the meeting.";
+
+  return `Subject: Meeting Recap & Next Steps
+
+Hi team,
+
+${intro}
+
+Decisions
+${decisionBlock}
+
+Action Items
+${actionBlock}
+
+Risks / Issues
+${riskBlock}
+
+Open Questions
+${questionBlock}
+
+Please reply if anything is missing or needs to be corrected.
+
+Best regards,`;
 }
