@@ -144,9 +144,6 @@ export const summarizeNotes = createServerFn({ method: "POST" })
       (d) => typeof d === "string" && d.trim().length > 0 && !isNonDecision(d)
     );
 
-    const filteredDecisions = (parsed.decisionsMade ?? []).filter(
-      (d) => typeof d === "string" && d.trim().length > 0 && !NON_DECISION_PATTERNS.some((re) => re.test(d))
-    );
 
     let email = parsed.suggestedFollowUpEmail ?? "";
     if (email && !email.includes("\n")) {
