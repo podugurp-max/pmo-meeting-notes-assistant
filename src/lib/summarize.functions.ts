@@ -22,9 +22,29 @@ Additional rules:
 1. Treat phrases like "need someone to," "need to," "should," "must," "follow up with," and "ask [person/team] about" as possible action items, even when they are not phrased as explicit assignments.
 2. If an action item has no clear owner, set owner to "Not specified".
 3. If an action item has no clear deadline, set deadline to "Not specified".
-4. If the notes say "no final decision was made" (or similar language indicating a decision was deferred), do NOT list that as a decision. Return decisionsMade: [] and, if appropriate, place the pending question or next step under openQuestions.
-5. Never include "No final decision was made" (or paraphrases) as an item in decisionsMade.
-6. Return ONLY JSON that matches the provided response schema. Do not include any prose, markdown, or commentary outside the JSON.`;
+4. A decision must be an affirmative choice, approval, commitment, or agreed change. Statements about the absence of a decision are NOT decisions.
+5. "No final decision was made" (and any paraphrase such as "no decision was made," "not decided," "decision deferred," "decision pending") is NOT a decision and MUST NOT appear in decisionsMade.
+6. If no final decision was made on a topic, use decisionsMade: [] (or omit that topic from decisionsMade). You may mention the lack of a decision in executiveSummary only if it is useful context.
+7. Any follow-up step or next action that arose from an undecided topic must go under actionItems (if it has an owner or implied task) or openQuestions (if it remains an unresolved question).
+8. The suggestedFollowUpEmail MUST include explicit newline characters (\\n) so it renders as a readable email with separate paragraphs and sections. Use this structure with blank lines between sections:
+   - Subject line (e.g., "Subject: ...")
+   - Blank line
+   - Greeting (e.g., "Hi team,")
+   - Blank line
+   - Short summary paragraph
+   - Blank line
+   - Decisions section (omit or note "None" if empty)
+   - Blank line
+   - Action items section
+   - Blank line
+   - Risks / Issues section (only if any)
+   - Blank line
+   - Open questions section (only if any)
+   - Blank line
+   - Closing sentence
+   - Blank line
+   - Signature (e.g., "Best, [Your name]")
+9. Return ONLY JSON that matches the provided response schema. Do not include any prose, markdown, or commentary outside the JSON.`;
 
 const RESPONSE_SCHEMA = {
   type: "object",
@@ -107,9 +127,39 @@ export const summarizeNotes = createServerFn({ method: "POST" })
     }
 
     // Normalize defaults
+    const NON_DECISION_PATTERNS = [
+      /no\s+final\s+decision/i,
+      /no\s+decision\s+was\s+made/i,
+      /not\s+decided/i,
+      /decision\s+(was\s+)?deferred/i,
+      /decision\s+pending/i,
+      /no\s+decision\s+(yet|reached|made)/i,
+    ];
+
+    const filteredDecisions = (parsed.decisionsMade ?? []).filter(
+      (d) => typeof d === "string" && d.trim().length > 0 && !NON_DECISION_PATTERNS.some((re) => re.test(d))
+    );
+
+    let email = parsed.suggestedFollowUpEmail ?? "";
+    if (email && !email.includes("\n")) {
+      // Reformat into readable email spacing
+      email = email
+        // Break before common section labels
+        .replace(/\s*(Subject:)\s*/gi, "$1 ")
+        .replace(/\s*(Hi\s+team,|Hello\s+team,|Dear\s+team,)\s*/g, "\n\n$1\n\n")
+        .replace(/\s*(Decisions?:|Decisions Made:)\s*/gi, "\n\nDecisions:\n")
+        .replace(/\s*(Action Items?:)\s*/gi, "\n\nAction Items:\n")
+        .replace(/\s*(Risks?(\s*\/\s*Issues)?:|Issues:)\s*/gi, "\n\nRisks / Issues:\n")
+        .replace(/\s*(Open Questions?:)\s*/gi, "\n\nOpen Questions:\n")
+        .replace(/\s*(Best(,| regards,?)|Regards,|Thanks,|Sincerely,)\s*/gi, "\n\n$1\n")
+        .trim();
+      // Ensure subject is on its own line at the top
+      email = email.replace(/^(Subject:[^\n]*)/i, "$1\n");
+    }
+
     return {
       executiveSummary: parsed.executiveSummary ?? "",
-      decisionsMade: parsed.decisionsMade ?? [],
+      decisionsMade: filteredDecisions,
       actionItems: (parsed.actionItems ?? []).map((a) => ({
         task: a.task ?? "",
         owner: a.owner || "Not specified",
@@ -117,6 +167,6 @@ export const summarizeNotes = createServerFn({ method: "POST" })
       })),
       risksIssues: parsed.risksIssues ?? [],
       openQuestions: parsed.openQuestions ?? [],
-      suggestedFollowUpEmail: parsed.suggestedFollowUpEmail ?? "",
+      suggestedFollowUpEmail: email,
     };
   });
