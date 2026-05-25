@@ -127,9 +127,39 @@ export const summarizeNotes = createServerFn({ method: "POST" })
     }
 
     // Normalize defaults
+    const NON_DECISION_PATTERNS = [
+      /no\s+final\s+decision/i,
+      /no\s+decision\s+was\s+made/i,
+      /not\s+decided/i,
+      /decision\s+(was\s+)?deferred/i,
+      /decision\s+pending/i,
+      /no\s+decision\s+(yet|reached|made)/i,
+    ];
+
+    const filteredDecisions = (parsed.decisionsMade ?? []).filter(
+      (d) => typeof d === "string" && d.trim().length > 0 && !NON_DECISION_PATTERNS.some((re) => re.test(d))
+    );
+
+    let email = parsed.suggestedFollowUpEmail ?? "";
+    if (email && !email.includes("\n")) {
+      // Reformat into readable email spacing
+      email = email
+        // Break before common section labels
+        .replace(/\s*(Subject:)\s*/gi, "$1 ")
+        .replace(/\s*(Hi\s+team,|Hello\s+team,|Dear\s+team,)\s*/g, "\n\n$1\n\n")
+        .replace(/\s*(Decisions?:|Decisions Made:)\s*/gi, "\n\nDecisions:\n")
+        .replace(/\s*(Action Items?:)\s*/gi, "\n\nAction Items:\n")
+        .replace(/\s*(Risks?(\s*\/\s*Issues)?:|Issues:)\s*/gi, "\n\nRisks / Issues:\n")
+        .replace(/\s*(Open Questions?:)\s*/gi, "\n\nOpen Questions:\n")
+        .replace(/\s*(Best(,| regards,?)|Regards,|Thanks,|Sincerely,)\s*/gi, "\n\n$1\n")
+        .trim();
+      // Ensure subject is on its own line at the top
+      email = email.replace(/^(Subject:[^\n]*)/i, "$1\n");
+    }
+
     return {
       executiveSummary: parsed.executiveSummary ?? "",
-      decisionsMade: parsed.decisionsMade ?? [],
+      decisionsMade: filteredDecisions,
       actionItems: (parsed.actionItems ?? []).map((a) => ({
         task: a.task ?? "",
         owner: a.owner || "Not specified",
@@ -137,6 +167,6 @@ export const summarizeNotes = createServerFn({ method: "POST" })
       })),
       risksIssues: parsed.risksIssues ?? [],
       openQuestions: parsed.openQuestions ?? [],
-      suggestedFollowUpEmail: parsed.suggestedFollowUpEmail ?? "",
+      suggestedFollowUpEmail: email,
     };
   });
