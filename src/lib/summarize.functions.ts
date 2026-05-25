@@ -129,12 +129,20 @@ export const summarizeNotes = createServerFn({ method: "POST" })
     // Normalize defaults
     const NON_DECISION_PATTERNS = [
       /no\s+final\s+decision/i,
-      /no\s+decision\s+was\s+made/i,
-      /not\s+decided/i,
-      /decision\s+(was\s+)?deferred/i,
-      /decision\s+pending/i,
-      /no\s+decision\s+(yet|reached|made)/i,
+      /no\s+decision\s+was\s+(made|reached)/i,
+      /no\s+decision\s+(made|reached|yet)/i,
+      /not\s+(yet\s+)?decided/i,
+      /decision\s+(was\s+)?(deferred|pending|postponed)/i,
+      /decision\s+was\s+not\s+(made|reached)/i,
+      /no\s+conclusion\s+(was\s+)?reached/i,
     ];
+
+    const isNonDecision = (d: string) =>
+      NON_DECISION_PATTERNS.some((re) => re.test(d));
+
+    const filteredDecisions = (parsed.decisionsMade ?? []).filter(
+      (d) => typeof d === "string" && d.trim().length > 0 && !isNonDecision(d)
+    );
 
     const filteredDecisions = (parsed.decisionsMade ?? []).filter(
       (d) => typeof d === "string" && d.trim().length > 0 && !NON_DECISION_PATTERNS.some((re) => re.test(d))
