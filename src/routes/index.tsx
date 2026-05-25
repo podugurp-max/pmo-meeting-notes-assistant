@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +23,7 @@ import {
   Eraser,
   Briefcase,
 } from "lucide-react";
-import { parseNotes, type PMOSummary } from "@/lib/parseNotes";
+import { summarizeNotes, type PMOSummary } from "@/lib/summarize.functions";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -51,23 +52,30 @@ Attendees: Sarah, Marcus, Priya, Daniel
 - Agreed to run a final go/no-go review on October 10.`;
 
 function Index() {
+  const summarize = useServerFn(summarizeNotes);
   const [notes, setNotes] = useState("");
   const [result, setResult] = useState<PMOSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!notes.trim()) {
-      toast.error("Please paste some meeting notes first.");
+      toast.error("Please paste your meeting notes first.");
       return;
     }
     setLoading(true);
-    // Small delay for perceived processing
-    setTimeout(() => {
-      setResult(parseNotes(notes));
-      setLoading(false);
+    try {
+      const r = await summarize({ data: { notes } });
+      setResult(r);
       toast.success("PMO summary generated.");
-    }, 400);
+    } catch (err) {
+      console.error(err);
+      toast.error(
+        "We couldn't generate the AI summary. Please try again in a moment."
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   const formatPlainText = (r: PMOSummary) => {
@@ -83,19 +91,19 @@ function Index() {
 ${r.executiveSummary}
 
 DECISIONS MADE
-${r.decisions.length ? r.decisions.map((d) => `• ${d}`).join("\n") : "None identified."}
+${r.decisionsMade.length ? r.decisionsMade.map((d) => `• ${d}`).join("\n") : "None identified."}
 
 ACTION ITEMS
 ${ai}
 
 RISKS / ISSUES
-${r.risks.length ? r.risks.map((d) => `• ${d}`).join("\n") : "None identified."}
+${r.risksIssues.length ? r.risksIssues.map((d) => `• ${d}`).join("\n") : "None identified."}
 
 OPEN QUESTIONS
 ${r.openQuestions.length ? r.openQuestions.map((d) => `• ${d}`).join("\n") : "None identified."}
 
 SUGGESTED FOLLOW-UP EMAIL
-${r.followUpEmail}`;
+${r.suggestedFollowUpEmail}`;
   };
 
   const copyToClipboard = async (text: string, key: string) => {
@@ -129,9 +137,6 @@ ${r.followUpEmail}`;
               </p>
             </div>
           </div>
-          <Badge variant="secondary" className="hidden sm:inline-flex">
-            Demo · Rule-based parser
-          </Badge>
         </div>
       </header>
 
@@ -162,6 +167,7 @@ ${r.followUpEmail}`;
                 <AlertTriangle className="h-4 w-4" />
                 <AlertDescription className="text-xs">
                   Do not paste confidential or sensitive company information.
+                  AI-generated output. Review before sharing.
                 </AlertDescription>
               </Alert>
 
@@ -225,7 +231,7 @@ ${r.followUpEmail}`;
                   <div>
                     <CardTitle className="text-base">PMO Summary</CardTitle>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Generated from your notes · Review before sharing
+                      AI-generated output · Review before sharing
                     </p>
                   </div>
                   <Button
@@ -247,7 +253,7 @@ ${r.followUpEmail}`;
                     title="Executive Summary"
                   >
                     <p className="text-sm leading-relaxed text-foreground">
-                      {result.executiveSummary}
+                      {result.executiveSummary || "None identified."}
                     </p>
                   </Section>
 
@@ -256,9 +262,9 @@ ${r.followUpEmail}`;
                   <Section
                     icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" />}
                     title="Decisions Made"
-                    count={result.decisions.length}
+                    count={result.decisionsMade.length}
                   >
-                    <BulletList items={result.decisions} />
+                    <BulletList items={result.decisionsMade} />
                   </Section>
 
                   <Separator />
@@ -319,9 +325,9 @@ ${r.followUpEmail}`;
                   <Section
                     icon={<ShieldAlert className="h-4 w-4 text-red-600" />}
                     title="Risks / Issues"
-                    count={result.risks.length}
+                    count={result.risksIssues.length}
                   >
-                    <BulletList items={result.risks} />
+                    <BulletList items={result.risksIssues} />
                   </Section>
 
                   <Separator />
@@ -343,7 +349,7 @@ ${r.followUpEmail}`;
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => copyToClipboard(result.followUpEmail, "email")}
+                        onClick={() => copyToClipboard(result.suggestedFollowUpEmail, "email")}
                       >
                         {copied === "email" ? (
                           <Check className="mr-2 h-4 w-4" />
@@ -355,7 +361,7 @@ ${r.followUpEmail}`;
                     }
                   >
                     <pre className="whitespace-pre-wrap rounded-md border border-border bg-secondary/40 p-4 font-mono text-xs leading-relaxed text-foreground">
-                      {result.followUpEmail}
+                      {result.suggestedFollowUpEmail || "None identified."}
                     </pre>
                   </Section>
                 </CardContent>
@@ -367,8 +373,7 @@ ${r.followUpEmail}`;
 
       <footer className="border-t border-border py-6">
         <div className="mx-auto max-w-6xl px-6 text-xs text-muted-foreground">
-          PMO Meeting Notes Assistant · Outputs are organized from your notes
-          only. Always review before sharing.
+          PMO Meeting Notes Assistant · AI-generated output. Review before sharing.
         </div>
       </footer>
     </div>
